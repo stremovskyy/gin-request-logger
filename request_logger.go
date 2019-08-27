@@ -15,6 +15,8 @@ func RequestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestId := uuid.New()
 		c.Set(RequestContextUUIDTag, requestId)
+		c.Set(RequestContextIPTag, c.ClientIP())
+
 		requestLogger := log.WithFields(log.Fields{"request_id": requestId, "user_ip": c.ClientIP()})
 
 		if c.Request.Method == http.MethodPost || c.Request.Method == http.MethodPut || c.Request.Method == http.MethodDelete {
@@ -57,6 +59,10 @@ func readBody(reader io.Reader) string {
 }
 
 func handleServerError(s int, c *gin.Context, reqBody string, requestLogger *log.Entry) {
+	response, exists := c.Get(ResponseContextBodyTag)
+	if exists {
+		requestLogger.WithField("response_body", response)
+	}
 	requestLogger.WithField("response_status", s).Error("Server Error response")
 
 	if len(reqBody) > 0 {
@@ -65,6 +71,10 @@ func handleServerError(s int, c *gin.Context, reqBody string, requestLogger *log
 }
 
 func handleBadRequest(s int, c *gin.Context, reqBody string, requestLogger *log.Entry) {
+	response, exists := c.Get(ResponseContextBodyTag)
+	if exists {
+		requestLogger.WithField("response_body", response)
+	}
 	requestLogger.WithField("response_status", s).Warn("Bad Request response")
 
 	if len(reqBody) > 0 {
@@ -73,9 +83,13 @@ func handleBadRequest(s int, c *gin.Context, reqBody string, requestLogger *log.
 }
 
 func handleNormalResponse(s int, c *gin.Context, reqBody string, requestLogger *log.Entry) {
+	response, exists := c.Get(ResponseContextBodyTag)
+	if exists {
+		requestLogger.WithField("response_body", response)
+	}
 	requestLogger.WithField("response_status", s).Trace("Normal response")
 
 	if len(reqBody) > 0 {
-		log.Trace("Request Body: %s\n", reqBody)
+		log.Tracef("Request Body: %s\n", reqBody)
 	}
 }

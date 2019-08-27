@@ -1,5 +1,5 @@
 package gin_request_logger
 
-const RequestContextBodyTag = "RequestBody"
+const ResponseContextBodyTag = "ResponseBody"
 const RequestContextUUIDTag = "RequestUUID"
 const RequestContextIPTag = "RequestIP"
