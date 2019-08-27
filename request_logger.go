@@ -37,9 +37,15 @@ func New(options Options) gin.HandlerFunc {
 
 func (h *handler) handle() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		requestId := uuid.New()
+		requestId := c.GetHeader("X-Request-ID")
+		if requestId == "" {
+			requestId = uuid.New().String()
+		}
+
 		c.Set(RequestContextUUIDTag, requestId)
 		c.Set(RequestContextIPTag, c.ClientIP())
+
+		c.Header("X-Request-ID", requestId)
 
 		requestLogger := h.logger.WithFields(log.Fields{"request_id": requestId, "user_ip": c.ClientIP()})
 
