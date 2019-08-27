@@ -11,13 +11,37 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func RequestLogger() gin.HandlerFunc {
+type handler struct {
+	isDebug bool
+	logger  *log.Logger
+}
+
+func New(options Options) gin.HandlerFunc {
+	handler := handler{
+		isDebug: false,
+		logger:  log.New(),
+	}
+
+	handler.logger.SetFormatter(&log.TextFormatter{
+		FullTimestamp:   true,
+		TimestampFormat: "02.01.2006 15:04:05",
+	})
+
+	if options.IsDebug {
+		handler.isDebug = true
+		handler.logger.SetLevel(log.TraceLevel)
+	}
+
+	return handler.handle()
+}
+
+func (h *handler) handle() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestId := uuid.New()
 		c.Set(RequestContextUUIDTag, requestId)
 		c.Set(RequestContextIPTag, c.ClientIP())
 
-		requestLogger := log.WithFields(log.Fields{"request_id": requestId, "user_ip": c.ClientIP()})
+		requestLogger := h.logger.WithFields(log.Fields{"request_id": requestId, "user_ip": c.ClientIP()})
 
 		if c.Request.Method == http.MethodPost || c.Request.Method == http.MethodPut || c.Request.Method == http.MethodDelete {
 			bufs, err := ioutil.ReadAll(c.Request.Body)
@@ -59,37 +83,43 @@ func readBody(reader io.Reader) string {
 }
 
 func handleServerError(s int, c *gin.Context, reqBody string, requestLogger *log.Entry) {
-	setContextDataTologger(c, requestLogger).WithField("response_status", s).Error("Server Error response")
+	requestLogger = setContextDataTologger(c, requestLogger).WithField("response_status", s)
 
 	if len(reqBody) > 0 {
-		log.Infof("Request Body: %s\n", reqBody)
+		requestLogger.Errorf("[Server Error] Request Body: %s\n", reqBody)
+	} else {
+		requestLogger.Error("Server Error response")
 	}
 }
 
 func handleBadRequest(s int, c *gin.Context, reqBody string, requestLogger *log.Entry) {
-	setContextDataTologger(c, requestLogger).WithField("response_status", s).Warn("Bad Request response")
+	requestLogger = setContextDataTologger(c, requestLogger).WithField("response_status", s)
 
 	if len(reqBody) > 0 {
-		log.Infof("Request Body: %s\n", reqBody)
+		requestLogger.Warnf("[Bad Request] Request Body: %s\n", reqBody)
+	} else {
+		requestLogger.Warn("Bad Request response")
 	}
 }
 
 func handleNormalResponse(s int, c *gin.Context, reqBody string, requestLogger *log.Entry) {
-	setContextDataTologger(c, requestLogger).WithField("response_status", s).Trace("Normal response")
+	requestLogger = setContextDataTologger(c, requestLogger).WithField("response_status", s)
 
 	if len(reqBody) > 0 {
-		log.Tracef("Request Body: %s\n", reqBody)
+		requestLogger.Tracef("[OK Response] Request Body: %s\n", reqBody)
+	} else {
+		requestLogger.Trace("Normal response")
 	}
 }
 
 func setContextDataTologger(c *gin.Context, logger *log.Entry) *log.Entry {
 	response, exists := c.Get(ResponseContextBodyTag)
 	if exists {
-		logger.WithField("response_body", response)
+		logger = logger.WithField("response_body", response)
 	}
 	context, exists := c.Get(ResponseContextInfoTag)
 	if exists {
-		logger.WithField("response_context", context)
+		logger = logger.WithField("response_context", context)
 	}
 
 	return logger
