@@ -13,7 +13,9 @@ import (
 
 func RequestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Set(RequestContextUUIDTag, uuid.New())
+		requestId := uuid.New()
+		c.Set(RequestContextUUIDTag, requestId)
+		requestLogger := log.WithFields(log.Fields{"request_id": requestId, "user_ip": c.ClientIP()})
 
 		if c.Request.Method == http.MethodPost || c.Request.Method == http.MethodPut || c.Request.Method == http.MethodDelete {
 			bufs, err := ioutil.ReadAll(c.Request.Body)
@@ -27,20 +29,19 @@ func RequestLogger() gin.HandlerFunc {
 			c.Request.Body = secondCloser
 			c.Next()
 
-			s := c.Writer.Status()
+			status := c.Writer.Status()
 
 			switch {
-			case s >= http.StatusOK && s < http.StatusMultipleChoices:
-				handleNormalResponse(s, c, body)
-			case s >= http.StatusBadRequest && s < http.StatusInternalServerError:
-				handleBadRequest(s, c, body)
-			case s >= http.StatusInternalServerError:
-				handleServerError(s, c, body)
+			case status >= http.StatusOK && status < http.StatusMultipleChoices:
+				handleNormalResponse(status, c, body, requestLogger)
+			case status >= http.StatusBadRequest && status < http.StatusInternalServerError:
+				handleBadRequest(status, c, body, requestLogger)
+			case status >= http.StatusInternalServerError:
+				handleServerError(status, c, body, requestLogger)
 			default:
-				log.Errorf("WTF ERROR!: Status: %d, IP: %12v, Body: %s", s, c.ClientIP(), body)
+				log.Errorf("WTF ERROR!: Status: %d, IP: %12v, Body: %status", status, c.ClientIP(), body)
 			}
 		}
-
 	}
 }
 
@@ -55,17 +56,9 @@ func readBody(reader io.Reader) string {
 	return s
 }
 
-func handleServerError(s int, c *gin.Context, reqBody string) {
-	id, exists := c.Get(RequestContextUUIDTag)
-	unq := uuid.New()
-	if exists {
-		unq = id.(uuid.UUID)
-	}
-
-	log.WithFields(log.Fields{
-		"Status": s,
-		"IP":     c.ClientIP(),
-		"ID":     unq.String(),
+func handleServerError(s int, c *gin.Context, reqBody string, requestLogger *log.Entry) {
+	requestLogger.WithFields(log.Fields{
+		"response_status": s,
 	}).Error("Server Error response")
 
 	if len(reqBody) > 0 {
@@ -73,17 +66,9 @@ func handleServerError(s int, c *gin.Context, reqBody string) {
 	}
 }
 
-func handleBadRequest(s int, c *gin.Context, reqBody string) {
-	id, exists := c.Get(RequestContextUUIDTag)
-	unq := uuid.New()
-	if exists {
-		unq = id.(uuid.UUID)
-	}
-
+func handleBadRequest(s int, c *gin.Context, reqBody string, requestLogger *log.Entry) {
 	log.WithFields(log.Fields{
-		"Status": s,
-		"IP":     c.ClientIP(),
-		"ID":     unq.String(),
+		"response_status": s,
 	}).Warn("Bad Request response")
 
 	if len(reqBody) > 0 {
@@ -91,18 +76,10 @@ func handleBadRequest(s int, c *gin.Context, reqBody string) {
 	}
 }
 
-func handleNormalResponse(s int, c *gin.Context, reqBody string) {
-	id, exists := c.Get(RequestContextUUIDTag)
-	unq := uuid.New()
-	if exists {
-		unq = id.(uuid.UUID)
-	}
-
+func handleNormalResponse(s int, c *gin.Context, reqBody string, requestLogger *log.Entry) {
 	log.WithFields(log.Fields{
-		"Status": s,
-		"IP":     c.ClientIP(),
-		"ID":     unq.String(),
-	}).Trace("Bad Request response")
+		"response_status": s,
+	}).Trace("Normal response")
 
 	if len(reqBody) > 0 {
 		log.Trace("Request Body: %s\n", reqBody)
