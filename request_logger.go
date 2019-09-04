@@ -49,6 +49,8 @@ func (h *handler) handle() gin.HandlerFunc {
 
 		requestLogger := h.logger.WithFields(log.Fields{"request_id": requestId, "user_ip": c.ClientIP()})
 
+		var body string
+
 		if c.Request.Method == http.MethodPost || c.Request.Method == http.MethodPut || c.Request.Method == http.MethodDelete {
 			bufs, err := ioutil.ReadAll(c.Request.Body)
 			if err != nil {
@@ -57,23 +59,27 @@ func (h *handler) handle() gin.HandlerFunc {
 			firstCloser := ioutil.NopCloser(bytes.NewBuffer(bufs))
 			secondCloser := ioutil.NopCloser(bytes.NewBuffer(bufs))
 
-			body := readBody(firstCloser)
+			body = readBody(firstCloser)
 			c.Request.Body = secondCloser
 			c.Next()
 
-			status := c.Writer.Status()
-
-			switch {
-			case status >= http.StatusOK && status < http.StatusMultipleChoices:
-				handleNormalResponse(status, c, body, requestLogger)
-			case status >= http.StatusBadRequest && status < http.StatusInternalServerError:
-				handleBadRequest(status, c, body, requestLogger)
-			case status >= http.StatusInternalServerError:
-				handleServerError(status, c, body, requestLogger)
-			default:
-				log.Errorf("WTF ERROR!: Status: %d, IP: %12v, Body: %status", status, c.ClientIP(), body)
-			}
+		} else {
+			body = "GET URI: " + c.Request.RequestURI
 		}
+
+		status := c.Writer.Status()
+
+		switch {
+		case status >= http.StatusOK && status < http.StatusMultipleChoices:
+			handleNormalResponse(status, c, body, requestLogger)
+		case status >= http.StatusBadRequest && status < http.StatusInternalServerError:
+			handleBadRequest(status, c, body, requestLogger)
+		case status >= http.StatusInternalServerError:
+			handleServerError(status, c, body, requestLogger)
+		default:
+			log.Errorf("WTF ERROR!: Status: %d, IP: %12v, Body: %status", status, c.ClientIP(), body)
+		}
+
 	}
 }
 
