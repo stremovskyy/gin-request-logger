@@ -61,11 +61,11 @@ func (h *handler) handle() gin.HandlerFunc {
 
 			body = readBody(firstCloser)
 			c.Request.Body = secondCloser
-			c.Next()
 
 		} else {
 			body = "GET URI: " + c.Request.RequestURI
 		}
+		c.Next()
 
 		status := c.Writer.Status()
 
