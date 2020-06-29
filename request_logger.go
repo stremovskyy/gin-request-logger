@@ -32,10 +32,10 @@ func New(options Options) gin.HandlerFunc {
 		handler.logger.SetLevel(log.TraceLevel)
 	}
 
-	return handler.handle()
+	return handler.handle(options)
 }
 
-func (h *handler) handle() gin.HandlerFunc {
+func (h *handler) handle(options Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestId := c.GetHeader("X-Request-ID")
 		if requestId == "" {
@@ -65,6 +65,9 @@ func (h *handler) handle() gin.HandlerFunc {
 		} else {
 			body = "GET URI: " + c.Request.RequestURI
 		}
+
+		blw := &bodyLogWriter{body: bytes.NewBufferString(""), ResponseWriter: c.Writer}
+		c.Writer = blw
 		c.Next()
 
 		status := c.Writer.Status()
@@ -80,7 +83,25 @@ func (h *handler) handle() gin.HandlerFunc {
 			log.Errorf("WTF ERROR!: Status: %d, IP: %12v, Body: %status", status, c.ClientIP(), body)
 		}
 
+		if options.LogResponse {
+			log.Tracef("[Response] Body: %s\n", blw.body.String())
+		}
 	}
+}
+
+type bodyLogWriter struct {
+	gin.ResponseWriter
+	body *bytes.Buffer
+}
+
+func (w bodyLogWriter) Write(b []byte) (int, error) {
+	w.body.Write(b)
+	return w.ResponseWriter.Write(b)
+}
+
+func (w bodyLogWriter) WriteString(s string) (int, error) {
+	w.body.WriteString(s)
+	return w.ResponseWriter.WriteString(s)
 }
 
 func readBody(reader io.Reader) string {
