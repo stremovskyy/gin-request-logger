@@ -19,18 +19,17 @@ var (
 
 const (
 	// ANSI color escape sequences
-	ColorReset   = "\033[0m"
-	ColorCyan    = "\033[36m"
-	ColorYellow  = "\033[33m"
-	ColorGreen   = "\033[32m"
-	ColorRed     = "\033[31m"
-	ColorMagenta = "\033[35m"
+	ColorReset  = "\033[0m"
+	ColorCyan   = "\033[36m"
+	ColorYellow = "\033[33m"
+	ColorGreen  = "\033[32m"
+	ColorRed    = "\033[31m"
 )
 
 func RequestLogger(pretty bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Generate and assign a unique request ID
-		requestID := generateRequestID()
+		requestID := getRequestID(c)
 
 		// Read the request body
 		requestBody, err := io.ReadAll(c.Request.Body)
@@ -138,10 +137,15 @@ func getStatusColor(statusCode int) string {
 	}
 }
 
-func generateRequestID() string {
-	mutex.Lock()
-	defer mutex.Unlock()
+func getRequestID(c *gin.Context) string {
+	requestID := c.GetHeader("X-Request-ID")
+	if requestID == "" {
+		mutex.Lock()
+		defer mutex.Unlock()
 
-	requestCounter++
-	return fmt.Sprintf("REQ-%d", requestCounter)
+		requestCounter++
+		requestID = fmt.Sprintf("REQ-%d", requestCounter)
+	}
+
+	return requestID
 }
