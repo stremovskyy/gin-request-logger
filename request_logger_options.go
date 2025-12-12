@@ -11,4 +11,8 @@ type Options struct {
 
 	// Pretty is a flag for enabling pretty JSON logging.
 	Pretty bool
+
+	// MaxBodyLogSize limits how many bytes from the body are written to logs.
+	// Use a negative value to disable truncation.
+	MaxBodyLogSize int
 }

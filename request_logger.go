@@ -1,6 +1,8 @@
 package gin_request_logger
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
@@ -24,14 +26,24 @@ const (
 	ColorYellow = "\033[33m"
 	ColorGreen  = "\033[32m"
 	ColorRed    = "\033[31m"
+
+	defaultMaxBodyLogSize = 1024 // 1 KB
 )
 
 func RequestLogger(pretty bool) gin.HandlerFunc {
+	return RequestLoggerWithOptions(Options{
+		Pretty:         pretty,
+		LogResponse:    true,
+		MaxBodyLogSize: defaultMaxBodyLogSize,
+	})
+}
+
+func RequestLoggerWithOptions(options Options) gin.HandlerFunc {
+	opts := applyDefaults(options)
+
 	return func(c *gin.Context) {
-		// Generate and assign a unique request ID
 		requestID := getRequestID(c)
 
-		// Read the request body
 		requestBody, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
@@ -39,44 +51,47 @@ func RequestLogger(pretty bool) gin.HandlerFunc {
 		}
 
 		// Restore the request body to the original state
-		c.Request.Body = io.NopCloser(strings.NewReader(string(requestBody)))
+		c.Request.Body = io.NopCloser(bytes.NewReader(requestBody))
 
-		// Log the request URL, parameters, and request ID
 		log.Trace(ColorCyan + "╔═════HTTP REQUEST\n")
 		log.Trace(fmt.Sprintf("[%s] URL: %s", requestID, c.Request.URL.String()))
 		log.Trace(fmt.Sprintf("[%s] Parameters: %s", requestID, getURLParameters(c.Request.URL)))
 		log.Trace(ColorCyan + "╚═════END HTTP REQUEST" + ColorReset)
 
-		// Log the request body as a nicely formatted JSON with cyan color
 		log.Trace(ColorCyan + "╔═════HTTP REQUEST BODY\n")
-		log.Trace(fmt.Sprintf("[%s] %s", requestID, printData(string(requestBody), pretty)))
+		log.Trace(fmt.Sprintf("[%s] %s", requestID, prepareBodyForLog(requestBody, c.Request.Header.Get("Content-Type"), opts.Pretty, opts.MaxBodyLogSize)))
 		log.Trace(ColorCyan + "╚═════END HTTP REQUEST BODY" + ColorReset)
 
-		// Create a custom response writer
-		body := &strings.Builder{}
+		body := &bytes.Buffer{}
 		writer := &responseBodyWriter{
 			ResponseWriter: c.Writer,
 			body:           body,
 		}
 		c.Writer = writer
 
-		// Process the request
 		c.Next()
 
-		// Read the response body
-		responseBody := body.String()
-
-		// Log the response body as a nicely formatted JSON with yellow color
-		log.Trace(ColorYellow + "╔═════HTTP RESPONSE\n")
-		log.Trace(fmt.Sprintf("[%s] %s", requestID, printData(responseBody, pretty)))
-		log.Trace(ColorYellow + "╚═════END HTTP RESPONSE" + ColorReset)
-
-		// Log the status code with appropriate color
 		statusColor := getStatusColor(c.Writer.Status())
+
+		if opts.LogResponse {
+			log.Trace(ColorYellow + "╔═════HTTP RESPONSE\n")
+			loggedBody := formatResponseBodyForLog(c.Writer.Header(), body.Bytes(), opts.Pretty, opts.MaxBodyLogSize)
+			log.Trace(fmt.Sprintf("[%s] %s", requestID, loggedBody))
+			log.Trace(ColorYellow + "╚═════END HTTP RESPONSE" + ColorReset)
+		}
+
 		log.Trace(statusColor + "╔═════HTTP RESPONSE STATUS\n")
 		log.Trace(fmt.Sprintf("[%s] Status: %d %s", requestID, c.Writer.Status(), http.StatusText(c.Writer.Status())))
 		log.Trace(statusColor + "╚═════END HTTP RESPONSE STATUS" + ColorReset)
 	}
+}
+
+func applyDefaults(opts Options) Options {
+	if opts.MaxBodyLogSize == 0 {
+		opts.MaxBodyLogSize = defaultMaxBodyLogSize
+	}
+
+	return opts
 }
 
 func printData(content string, pretty bool) string {
@@ -102,7 +117,7 @@ func formatJSON(content string) string {
 
 type responseBodyWriter struct {
 	gin.ResponseWriter
-	body *strings.Builder
+	body *bytes.Buffer
 }
 
 func (w *responseBodyWriter) Write(b []byte) (int, error) {
@@ -148,4 +163,102 @@ func getRequestID(c *gin.Context) string {
 	}
 
 	return requestID
+}
+
+func formatResponseBodyForLog(headers http.Header, body []byte, pretty bool, limit int) string {
+	contentType := headers.Get("Content-Type")
+
+	decodedBody := body
+
+	if isGzipEncoding(headers.Get("Content-Encoding")) {
+		decoded, err := gunzip(body)
+		if err == nil {
+			decodedBody = decoded
+		} else {
+			log.Debugf("failed to gunzip response body for logging: %v", err)
+		}
+	}
+
+	return prepareBodyForLog(decodedBody, contentType, pretty, limit)
+}
+
+func prepareBodyForLog(body []byte, contentType string, pretty bool, limit int) string {
+	if isBinaryContent(contentType, body) {
+		return binaryPlaceholder(len(body), contentType)
+	}
+
+	formatted := printData(string(body), pretty)
+	return truncateContent(formatted, limit)
+}
+
+func truncateContent(content string, limit int) string {
+	if limit < 0 || len(content) <= limit {
+		return content
+	}
+
+	return content[:limit] + fmt.Sprintf("... [truncated to %d bytes]", limit)
+}
+
+func gunzip(content []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(content))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
+
+func isGzipEncoding(encoding string) bool {
+	return strings.Contains(strings.ToLower(encoding), "gzip")
+}
+
+func isBinaryContent(contentType string, body []byte) bool {
+	ct := strings.ToLower(contentType)
+	switch {
+	case strings.HasPrefix(ct, "multipart/"),
+		strings.Contains(ct, "octet-stream"),
+		strings.HasPrefix(ct, "image/"),
+		strings.HasPrefix(ct, "audio/"),
+		strings.HasPrefix(ct, "video/"),
+		strings.Contains(ct, "zip"),
+		strings.Contains(ct, "pdf"),
+		strings.Contains(ct, "protobuf"),
+		strings.Contains(ct, "excel"),
+		strings.Contains(ct, "word"),
+		strings.Contains(ct, "powerpoint"),
+		strings.Contains(ct, "ms-"):
+		return true
+	}
+
+	if len(body) == 0 {
+		return false
+	}
+
+	sample := body
+	if len(sample) > 512 {
+		sample = sample[:512]
+	}
+
+	printable := 0
+	for _, b := range sample {
+		if (b >= 0x20 && b <= 0x7e) || b == '\n' || b == '\r' || b == '\t' {
+			printable++
+		}
+	}
+
+	return printable < len(sample)*8/10
+}
+
+func binaryPlaceholder(size int, contentType string) string {
+	if contentType == "" {
+		contentType = "unknown"
+	}
+
+	return fmt.Sprintf("[binary content omitted: %d bytes, content-type=%s]", size, contentType)
 }
